@@ -1,12 +1,6 @@
 import torch
 import torch.nn as nn
 import copy
-import sys
-from pathlib import Path
-
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 class PruningManager:
     """
@@ -22,7 +16,7 @@ class PruningManager:
         Save initial weights (θ₀) - the 'winning ticket' initialization
         Must be called before any training!
         """
-        self.initial_state = copy.deepcopy(self.model.state_dict())
+        self.initial_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
         print("✓ Initial weights saved")
     
     def initialize_masks(self):
@@ -33,7 +27,7 @@ class PruningManager:
         self.masks = {}
         for name, param in self.model.named_parameters():
             if 'weight' in name:  # Only prune weights, not biases
-                self.masks[name] = torch.ones_like(param.data)
+                self.masks[name] = torch.ones_like(param.data).cpu()
         
         print(f"✓ Initialized masks for {len(self.masks)} weight tensors")
     
@@ -47,7 +41,7 @@ class PruningManager:
                     # Move mask to same device as parameter
                     mask = self.masks[name].to(param.device)
                     param.data *= mask
-
+    
     def prune_by_magnitude(self, pruning_rate, layer_wise=True):
         """
         Prune weights by magnitude
@@ -55,7 +49,7 @@ class PruningManager:
         Args:
             pruning_rate: Fraction of remaining weights to prune (e.g., 0.2 = 20%)
             layer_wise: If True, prune each layer independently
-                    If False, prune globally across all layers
+                       If False, prune globally across all layers
         
         Returns:
             Current sparsity percentage
@@ -68,12 +62,15 @@ class PruningManager:
                 # Prune each layer separately
                 for name, param in self.model.named_parameters():
                     if name in self.masks:
-                        # Ensure mask is on same device as parameter
+                        # Get device of parameter
                         device = param.device
+                        
+                        # Move mask to device temporarily for computation
                         mask = self.masks[name].to(device)
                         
                         # Get currently active (non-zero) weights
-                        active_weights = param.data[mask == 1]
+                        active_mask = (mask == 1)
+                        active_weights = param.data[active_mask]
                         
                         if len(active_weights) == 0:
                             continue
@@ -83,54 +80,64 @@ class PruningManager:
                         
                         if num_to_prune > 0:
                             # Find threshold (k-th smallest magnitude)
-                            threshold = torch.topk(
-                                active_weights.abs().flatten(),
-                                num_to_prune,
-                                largest=False
-                            )[0].max()
+                            # Make sure active_weights is on the same device
+                            abs_weights = active_weights.abs().flatten()
                             
-                            # Update mask: prune weights below threshold
+                            # Use kthvalue instead of topk for better stability
+                            if num_to_prune < len(abs_weights):
+                                threshold = torch.kthvalue(abs_weights, num_to_prune)[0]
+                            else:
+                                threshold = abs_weights.max()
+                            
+                            # Update mask: prune weights below or equal to threshold
                             new_mask = (param.data.abs() > threshold).float()
                             
                             # Combine with existing mask (once pruned, stays pruned)
-                            self.masks[name] = torch.min(mask, new_mask).cpu()  # Store on CPU
+                            combined_mask = torch.min(mask, new_mask)
+                            
+                            # Store mask back on CPU
+                            self.masks[name] = combined_mask.cpu()
             
             else:
                 # Global pruning across all layers
                 all_weights = []
+                all_names = []
+                
                 for name, param in self.model.named_parameters():
                     if name in self.masks:
-                        mask = self.masks[name].to(param.device)
+                        device = param.device
+                        mask = self.masks[name].to(device)
                         active_weights = param.data[mask == 1]
                         all_weights.append(active_weights.flatten())
+                        all_names.append(name)
                 
                 # Concatenate all active weights
-                all_weights = torch.cat(all_weights)
-                
-                # Calculate global threshold
-                num_to_prune = int(len(all_weights) * pruning_rate)
-                
-                if num_to_prune > 0:
-                    threshold = torch.topk(
-                        all_weights.abs(),
-                        num_to_prune,
-                        largest=False
-                    )[0].max()
+                if len(all_weights) > 0:
+                    all_weights = torch.cat(all_weights)
                     
-                    # Update masks globally
-                    for name, param in self.model.named_parameters():
-                        if name in self.masks:
-                            new_mask = (param.data.abs() > threshold).float()
-                            mask = self.masks[name].to(param.device)
-                            self.masks[name] = torch.min(mask, new_mask).cpu()  # Store on CPU
+                    # Calculate global threshold
+                    num_to_prune = int(len(all_weights) * pruning_rate)
+                    
+                    if num_to_prune > 0 and num_to_prune < len(all_weights):
+                        abs_weights = all_weights.abs()
+                        threshold = torch.kthvalue(abs_weights, num_to_prune)[0]
+                        
+                        # Update masks globally
+                        for name, param in self.model.named_parameters():
+                            if name in self.masks:
+                                device = param.device
+                                mask = self.masks[name].to(device)
+                                new_mask = (param.data.abs() > threshold).float()
+                                combined_mask = torch.min(mask, new_mask)
+                                self.masks[name] = combined_mask.cpu()
             
             # Apply masks
             self.apply_masks()
         
         # Calculate and return current sparsity
         sparsity = self.get_sparsity()
-        return sparsity   
-     
+        return sparsity
+    
     def reset_to_initial_weights(self):
         """
         Reset remaining (non-pruned) weights to their initial values (θ₀)
@@ -143,14 +150,15 @@ class PruningManager:
             # Get the device of the first model parameter
             device = next(self.model.parameters()).device
             
-            # Load initial weights
+            # Load initial weights to the correct device
             initial_state_device = {k: v.to(device) for k, v in self.initial_state.items()}
             self.model.load_state_dict(initial_state_device)
             
             # Re-apply masks (zero out pruned weights)
             self.apply_masks()
+        
+        print("✓ Weights reset to initial values (with current mask applied)")
     
-    print("✓ Weights reset to initial values (with current mask applied)")   
     def get_sparsity(self):
         """Calculate current sparsity percentage"""
         total_params = 0
@@ -191,36 +199,50 @@ class PruningManager:
         print(f"{'='*60}\n")
 
 
-# Test pruning
+# Test pruning WITH GPU
 if __name__ == "__main__":
     from models.lenet import LeNet300100
     
-    print("Testing Pruning Manager\n")
+    print("Testing Pruning Manager with GPU simulation\n")
     
-    # Create model
-    model = LeNet300100()
-    print(f"Initial parameters: {model.count_parameters():,}")
+    # Test on both CPU and GPU
+    devices = ['cpu']
+    if torch.cuda.is_available():
+        devices.append('cuda')
     
-    # Create pruning manager
-    pruner = PruningManager(model)
-    
-    # Save initial weights
-    pruner.save_initial_weights()
-    
-    # Initialize masks
-    pruner.initialize_masks()
-    
-    # Simulate iterative pruning
-    print("\nSimulating Iterative Pruning (20% per round):\n")
-    
-    for round in range(5):
-        sparsity = pruner.prune_by_magnitude(pruning_rate=0.2, layer_wise=True)
-        print(f"Round {round + 1}: Sparsity = {sparsity:.2f}%, Remaining = {pruner.get_remaining_percentage():.2f}%")
-    
-    # Print detailed stats
-    pruner.print_pruning_stats()
-    
-    # Test reset
-    print("Testing weight reset...")
-    pruner.reset_to_initial_weights()
-    print(f"Non-zero parameters after reset: {model.count_nonzero_parameters():,}")
+    for device_name in devices:
+        print(f"\n{'='*60}")
+        print(f"Testing on {device_name.upper()}")
+        print(f"{'='*60}\n")
+        
+        device = torch.device(device_name)
+        
+        # Create model and move to device
+        model = LeNet300100().to(device)
+        print(f"Model on device: {next(model.parameters()).device}")
+        print(f"Initial parameters: {model.count_parameters():,}")
+        
+        # Create pruning manager
+        pruner = PruningManager(model)
+        
+        # Save initial weights
+        pruner.save_initial_weights()
+        
+        # Initialize masks
+        pruner.initialize_masks()
+        
+        # Simulate iterative pruning
+        print("\nSimulating Iterative Pruning (20% per round):\n")
+        
+        for round in range(5):
+            sparsity = pruner.prune_by_magnitude(pruning_rate=0.2, layer_wise=True)
+            print(f"Round {round + 1}: Sparsity = {sparsity:.2f}%, Remaining = {pruner.get_remaining_percentage():.2f}%")
+        
+        # Print detailed stats
+        pruner.print_pruning_stats()
+        
+        # Test reset
+        print("Testing weight reset...")
+        pruner.reset_to_initial_weights()
+        print(f"Non-zero parameters after reset: {model.count_nonzero_parameters():,}")
+        print(f"Model still on device: {next(model.parameters()).device}\n")
