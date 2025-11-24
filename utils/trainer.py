@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from tqdm import tqdm
 import time
 import sys
 from pathlib import Path
@@ -45,8 +44,7 @@ class Trainer:
         correct = 0
         total = 0
         
-        pbar = tqdm(self.train_loader, desc='Training')
-        for batch_idx, (data, target) in enumerate(pbar):
+        for batch_idx, (data, target) in enumerate(self.train_loader):
             data, target = data.to(self.device), target.to(self.device)
             
             # Zero gradients
@@ -65,12 +63,6 @@ class Trainer:
             _, predicted = output.max(1)
             total += target.size(0)
             correct += predicted.eq(target).sum().item()
-            
-            # Update progress bar
-            pbar.set_postfix({
-                'loss': f'{running_loss/(batch_idx+1):.4f}',
-                'acc': f'{100.*correct/total:.2f}%'
-            })
         
         epoch_loss = running_loss / len(self.train_loader)
         epoch_acc = 100. * correct / total
@@ -85,7 +77,7 @@ class Trainer:
         total = 0
         
         with torch.no_grad():
-            for data, target in tqdm(data_loader, desc=desc, leave=False):
+            for data, target in data_loader:
                 data, target = data.to(self.device), target.to(self.device)
                 
                 output = self.model(data)

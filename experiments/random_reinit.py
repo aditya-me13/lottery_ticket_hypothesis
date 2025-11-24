@@ -102,7 +102,7 @@ class RandomReinitExperiment(LotteryTicketExperiment):
         self.print_summary()
         return self.results
 
-
+# Use this for testing purposes
 def main():
     experiment = RandomReinitExperiment(
         pruning_rate=0.2,
