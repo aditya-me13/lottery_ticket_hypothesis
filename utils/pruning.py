@@ -1,34 +1,15 @@
 import torch
 import torch.nn as nn
 import copy
-from datetime import datetime
-from pathlib import Path
 
 class PruningManager:
     """
     Manages iterative magnitude-based pruning for Lottery Ticket Hypothesis
     """
-    def __init__(self, model, log_file=None):
+    def __init__(self, model):
         self.model = model
         self.initial_state = None
         self.masks = {}
-        
-        # Setup logging
-        self.log_file = log_file
-        if self.log_file:
-            log_path = Path(self.log_file)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            # Create/clear log file and write header
-            with open(self.log_file, 'w') as f:
-                f.write(f"Pruning Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write("="*60 + "\n\n")
-    
-    def log(self, message):
-        """Print message and save to log file if specified"""
-        print(message)
-        if self.log_file:
-            with open(self.log_file, 'a') as f:
-                f.write(message + '\n')
         
     def save_initial_weights(self):
         """
@@ -36,7 +17,7 @@ class PruningManager:
         Must be called before any training!
         """
         self.initial_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
-        self.log("✓ Initial weights saved")
+        print("✓ Initial weights saved")
     
     def initialize_masks(self):
         """
@@ -48,8 +29,8 @@ class PruningManager:
             # Prune both conv and fc weights, but not biases
             if 'weight' in name:
                 self.masks[name] = torch.ones_like(param.data).cpu()
-    
-        self.log(f"✓ Initialized masks for {len(self.masks)} weight tensors")
+        
+        print(f"✓ Initialized masks for {len(self.masks)} weight tensors")
     
     def apply_masks(self):
         """
@@ -177,7 +158,7 @@ class PruningManager:
             # Re-apply masks (zero out pruned weights)
             self.apply_masks()
         
-        self.log("✓ Weights reset to initial values (with current mask applied)")
+        print("✓ Weights reset to initial values (with current mask applied)")
     
     def get_sparsity(self):
         """Calculate current sparsity percentage"""
@@ -197,9 +178,9 @@ class PruningManager:
     
     def print_pruning_stats(self):
         """Print detailed pruning statistics"""
-        self.log(f"\n{'='*60}")
-        self.log("Pruning Statistics:")
-        self.log(f"{'='*60}")
+        print(f"\n{'='*60}")
+        print("Pruning Statistics:")
+        print(f"{'='*60}")
         
         for name, mask in self.masks.items():
             total = mask.numel()
@@ -207,16 +188,16 @@ class PruningManager:
             pruned = total - remaining
             remaining_pct = 100.0 * remaining / total
             
-            self.log(f"  {name:20s}: {remaining:6d}/{total:6d} ({remaining_pct:5.1f}% remaining)")
+            print(f"  {name:20s}: {remaining:6d}/{total:6d} ({remaining_pct:5.1f}% remaining)")
         
         total_params = sum(mask.numel() for mask in self.masks.values())
         total_remaining = sum((mask == 1).sum().item() for mask in self.masks.values())
         overall_sparsity = self.get_sparsity()
         
-        self.log(f"{'='*60}")
-        self.log(f"  Overall: {total_remaining:,}/{total_params:,} ({100-overall_sparsity:.2f}% remaining)")
-        self.log(f"  Sparsity: {overall_sparsity:.2f}%")
-        self.log(f"{'='*60}\n")
+        print(f"{'='*60}")
+        print(f"  Overall: {total_remaining:,}/{total_params:,} ({100-overall_sparsity:.2f}% remaining)")
+        print(f"  Sparsity: {overall_sparsity:.2f}%")
+        print(f"{'='*60}\n")
 
 
 # Test pruning WITH GPU
