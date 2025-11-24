@@ -2,26 +2,41 @@ import torch
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, random_split
 
-def get_mnist_dataloaders(batch_size=60, data_dir='./data'):
+def get_mnist_dataloaders(batch_size=60, data_dir='./data', fashion=False):
     """
-    Load MNIST dataset and create train/validation/test dataloaders
+    Load MNIST or Fashion-MNIST dataset and create train/validation/test dataloaders
     
     Args:
         batch_size: Batch size for training
-        data_dir: Directory to store MNIST data
+        data_dir: Directory to store data
+        fashion: If True, use Fashion-MNIST; if False, use MNIST
     
     Returns:
         train_loader, val_loader, test_loader
     """
     
     # Define transforms (normalize to match paper setup)
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))  # MNIST mean and std
-    ])
+    if fashion:
+        # Fashion-MNIST normalization
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.2860,), (0.3530,))  # Fashion-MNIST mean and std
+        ])
+        dataset_class = datasets.FashionMNIST
+        dataset_name = "Fashion-MNIST"
+    else:
+        # MNIST normalization
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))  # MNIST mean and std
+        ])
+        dataset_class = datasets.MNIST
+        dataset_name = "MNIST"
+    
+    print(f"Loading {dataset_name}...")
     
     # Download and load training data
-    train_dataset = datasets.MNIST(
+    train_dataset = dataset_class(
         root=data_dir,
         train=True,
         download=True,
@@ -29,7 +44,7 @@ def get_mnist_dataloaders(batch_size=60, data_dir='./data'):
     )
     
     # Download and load test data
-    test_dataset = datasets.MNIST(
+    test_dataset = dataset_class(
         root=data_dir,
         train=False,
         download=True,
@@ -75,13 +90,19 @@ def get_mnist_dataloaders(batch_size=60, data_dir='./data'):
 
 # Test the data loader
 if __name__ == "__main__":
-    train_loader, val_loader, test_loader = get_mnist_dataloaders()
+    print("Testing MNIST:")
+    train_loader, val_loader, test_loader = get_mnist_dataloaders(fashion=False)
+    print(f"  Train batches: {len(train_loader)}")
+    print(f"  Val batches: {len(val_loader)}")
+    print(f"  Test batches: {len(test_loader)}")
     
-    print(f"Train batches: {len(train_loader)}")
-    print(f"Validation batches: {len(val_loader)}")
-    print(f"Test batches: {len(test_loader)}")
+    print("\nTesting Fashion-MNIST:")
+    train_loader, val_loader, test_loader = get_mnist_dataloaders(fashion=True)
+    print(f"  Train batches: {len(train_loader)}")
+    print(f"  Val batches: {len(val_loader)}")
+    print(f"  Test batches: {len(test_loader)}")
     
     # Check one batch
     images, labels = next(iter(train_loader))
-    print(f"Batch shape: {images.shape}")
+    print(f"\nBatch shape: {images.shape}")
     print(f"Labels shape: {labels.shape}")

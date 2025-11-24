@@ -6,23 +6,23 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from experiments.iterative_pruning import LotteryTicketExperiment
-from utils.pruning import PruningManager
-from models.lenet import LeNet300100
+from models.lenet_conv import LeNet5
 from utils.data_loader import get_mnist_dataloaders
 from utils.trainer import Trainer
+from utils.pruning import PruningManager
 import time
 
-class RandomReinitExperiment(LotteryTicketExperiment):
+class ConvLeNet5Experiment(LotteryTicketExperiment):
     """
-    Same as lottery ticket but with random reinitialization after pruning
-    This should perform WORSE, proving initialization matters!
+    Lottery Ticket Experiment with Convolutional LeNet-5
     """
     
     def run(self):
-        """Run iterative pruning with random reinitialization"""
+        """Run with Conv LeNet-5"""
         
-        print("\nRANDOM REINITIALIZATION EXPERIMENT")
-        print("Weights will be randomly reinitialized after each pruning round\n")
+        print(f"\n{'='*70}")
+        print("CONVOLUTIONAL LENET-5 EXPERIMENT")
+        print(f"{'='*70}\n")
         
         # Load data
         train_loader, val_loader, test_loader = get_mnist_dataloaders(
@@ -30,12 +30,13 @@ class RandomReinitExperiment(LotteryTicketExperiment):
             fashion=True
         )
         
-        # Create model
-        model = LeNet300100()
+        # Create Conv model
+        model = LeNet5().to(self.device)
+        print(f"Using LeNet-5 (Convolutional) - {model.count_parameters():,} parameters")
         
         # Create pruning manager
         pruner = PruningManager(model)
-        pruner.save_initial_weights()  # Save for reference, but won't use
+        pruner.save_initial_weights()
         pruner.initialize_masks()
         
         for round_num in range(self.num_rounds):
@@ -77,7 +78,7 @@ class RandomReinitExperiment(LotteryTicketExperiment):
             print(f"  Early-stop val accuracy: {early_stop_val_acc:.2f}%")
             print(f"  Final test accuracy: {train_results['final_test_acc']:.2f}%")
             
-            # Prune and RANDOMLY REINITIALIZE
+            # Prune and reset
             if round_num < self.num_rounds - 1:
                 new_sparsity = pruner.prune_by_magnitude(
                     pruning_rate=self.pruning_rate,
@@ -87,34 +88,28 @@ class RandomReinitExperiment(LotteryTicketExperiment):
                 round_results['sparsity_after_pruning'] = new_sparsity
                 round_results['remaining_pct_after_pruning'] = 100 - new_sparsity
                 
-                print(f"\nRANDOM REINITIALIZATION (not resetting to θ₀)")
+                print(f"New sparsity: {new_sparsity:.2f}% ({100-new_sparsity:.2f}% remaining)")
                 
-                # Reinitialize the model with NEW random weights
-                model = LeNet300100()
-                model.to(self.device)
-                
-                # Apply the SAME mask to the new random weights
-                for name, param in model.named_parameters():
-                    if name in pruner.masks:
-                        param.data *= pruner.masks[name].to(self.device)
+                # Reset to initial weights
+                pruner.reset_to_initial_weights()
             
             self.results['rounds'].append(round_results)
         
         self.print_summary()
         return self.results
 
-# Use this for testing purposes
+
 def main():
-    experiment = RandomReinitExperiment(
+    experiment = ConvLeNet5Experiment(
         pruning_rate=0.2,
         num_rounds=15,
-        training_iterations=50000,
+        training_iterations=20000,  # Conv trains faster
         learning_rate=0.0012,
         batch_size=60
     )
     
     results = experiment.run()
-    experiment.save_results('results/random_reinit_experiment.json')
+    experiment.save_results('results/conv_lenet5_winning_ticket.json')
 
 
 if __name__ == "__main__":

@@ -78,7 +78,8 @@ class LotteryTicketExperiment:
         # Load data
         print("Loading MNIST data...")
         train_loader, val_loader, test_loader = get_mnist_dataloaders(
-            batch_size=self.batch_size
+            batch_size=self.batch_size,
+            fashion=True
         )
         
         # Create model
