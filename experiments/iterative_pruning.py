@@ -76,7 +76,6 @@ class LotteryTicketExperiment:
         """Run the complete iterative pruning experiment"""
         
         # Load data
-        print("Loading MNIST data...")
         train_loader, val_loader, test_loader = get_mnist_dataloaders(
             batch_size=self.batch_size,
             fashion=True
