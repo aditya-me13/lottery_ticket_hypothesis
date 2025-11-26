@@ -2,205 +2,172 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import time
-import sys
-from pathlib import Path
-
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
 
 class Trainer:
-    """
-    Trainer class for neural network training and evaluation
-    """
     def __init__(self, model, device, train_loader, val_loader, test_loader):
-        self.model = model
+        self.model = model.to(device)
         self.device = device
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.test_loader = test_loader
-        
-        # Move model to device
-        self.model.to(self.device)
-        
-        # Loss function
+
         self.criterion = nn.CrossEntropyLoss()
-        
-        # Training history
+
         self.history = {
-            'train_loss': [],
-            'train_acc': [],
-            'val_loss': [],
-            'val_acc': [],
-            'test_acc': [],
-            'iteration': []
+            "train_loss": [],
+            "train_acc": [],
+            "val_loss": [],
+            "val_acc": [],
+            "test_acc": [],
+            "iteration": [],
         }
-    
+
+    # one full pass over train set (used to keep epoch stats)
     def train_epoch(self, optimizer, pruner=None):
-        """Train for one epoch"""
         self.model.train()
-        running_loss = 0.0
-        correct = 0
-        total = 0
-        
-        for batch_idx, (data, target) in enumerate(self.train_loader):
+        running_loss, correct, total = 0.0, 0, 0
+
+        for data, target in self.train_loader:
             data, target = data.to(self.device), target.to(self.device)
-            
-            # Zero gradients
+
             optimizer.zero_grad()
-            
-            # Forward pass
-            output = self.model(data)
-            loss = self.criterion(output, target)
-            
-            # Backward pass
+            out = self.model(data)
+            loss = self.criterion(out, target)
             loss.backward()
             optimizer.step()
-            
-            # CRITICAL: Reapply mask after optimizer step to keep pruned weights at zero
+
             if pruner is not None:
-                pruner.apply_masks()
-            
-            # Statistics
+                pruner.apply_masks()  # keep pruned weights at zero
+
             running_loss += loss.item()
-            _, predicted = output.max(1)
+            _, pred = out.max(1)
             total += target.size(0)
-            correct += predicted.eq(target).sum().item()
-        
-        epoch_loss = running_loss / len(self.train_loader)
-        epoch_acc = 100. * correct / total
-        
-        return epoch_loss, epoch_acc
-    
-    def evaluate(self, data_loader, desc='Evaluating'):
-        """Evaluate on given data loader"""
+            correct += pred.eq(target).sum().item()
+
+        return running_loss / len(self.train_loader), 100.0 * correct / total
+
+    def evaluate(self, data_loader, desc="eval"):
         self.model.eval()
-        running_loss = 0.0
-        correct = 0
-        total = 0
-        
+        running_loss, correct, total = 0.0, 0, 0
+
         with torch.no_grad():
             for data, target in data_loader:
                 data, target = data.to(self.device), target.to(self.device)
-                
-                output = self.model(data)
-                loss = self.criterion(output, target)
-                
+                out = self.model(data)
+                loss = self.criterion(out, target)
+
                 running_loss += loss.item()
-                _, predicted = output.max(1)
+                _, pred = out.max(1)
                 total += target.size(0)
-                correct += predicted.eq(target).sum().item()
-        
+                correct += pred.eq(target).sum().item()
+
         avg_loss = running_loss / len(data_loader)
-        accuracy = 100. * correct / total
-        
-        return avg_loss, accuracy
-    
+        acc = 100.0 * correct / total
+        return avg_loss, acc
+
     def train(self, num_iterations, learning_rate=0.0012, eval_every=100, pruner=None):
         """
-        Train for specified number of iterations
-        
-        Args:
-            num_iterations: Total training iterations (paper uses 50,000)
-            learning_rate: Learning rate for Adam optimizer
-            eval_every: Evaluate every N iterations
-            pruner: PruningManager to apply masks during training
+        Train for a fixed number of iterations. Validates every epoch end.
         """
-        # Setup optimizer
         optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
-        
-        # Calculate iterations per epoch
-        iterations_per_epoch = len(self.train_loader)
-        num_epochs = (num_iterations + iterations_per_epoch - 1) // iterations_per_epoch
-        
-        print(f"\n{'='*60}")
-        print(f"Training Configuration:")
+
+        it_per_epoch = len(self.train_loader)
+        # ceil division for display only
+        num_epochs = (num_iterations + it_per_epoch - 1) // it_per_epoch
+
+        print("\n" + "=" * 60)
+        print("Training Configuration:")
         print(f"  Total iterations: {num_iterations:,}")
-        print(f"  Epochs: {num_epochs}")
+        print(f"  Epochs (approx): {num_epochs}")
         print(f"  Learning rate: {learning_rate}")
         print(f"  Optimizer: Adam")
         print(f"  Device: {self.device}")
+        # model must expose these (your models do)
         print(f"  Parameters: {self.model.count_parameters():,}")
         print(f"  Non-zero parameters: {self.model.count_nonzero_parameters():,}")
         print(f"  Sparsity: {self.model.get_sparsity():.2f}%")
-        print(f"{'='*60}\n")
-        
+        print("=" * 60 + "\n")
+
         iteration = 0
-        best_val_loss = float('inf')
+        best_val_loss = float("inf")
         best_val_iteration = 0
-        
+
         for epoch in range(num_epochs):
-            print(f"\nEpoch {epoch+1}/{num_epochs}")
-            
-            # Train one epoch
-            train_loss, train_acc = self.train_epoch(optimizer, pruner=pruner)
-            iteration += len(self.train_loader)
-            
-            # Evaluate
-            val_loss, val_acc = self.evaluate(self.val_loader, desc='Validation')
-            
-            # Track best validation loss (for early stopping criterion)
+            print(f"\nEpoch {epoch + 1}/{num_epochs}")
+
+            # epoch stats
+            self.model.train()
+            epoch_loss, epoch_correct, epoch_total = 0.0, 0, 0
+
+            for batch_idx, (data, target) in enumerate(self.train_loader):
+                if iteration >= num_iterations:
+                    break
+
+                data, target = data.to(self.device), target.to(self.device)
+
+                optimizer.zero_grad()
+                out = self.model(data)
+                loss = self.criterion(out, target)
+                loss.backward()
+                optimizer.step()
+
+                if pruner is not None:
+                    pruner.apply_masks()
+
+                # accumulate epoch stats
+                epoch_loss += loss.item()
+                _, pred = out.max(1)
+                epoch_total += target.size(0)
+                epoch_correct += pred.eq(target).sum().item()
+
+                iteration += 1
+
+            # epoch-end metrics
+            if epoch_total > 0:
+                ep_loss = epoch_loss / (batch_idx + 1)
+                ep_acc = 100.0 * epoch_correct / epoch_total
+            else:
+                ep_loss, ep_acc = 0.0, 0.0
+
+            # store epoch train metrics
+            self.history["train_loss"].append(ep_loss)
+            self.history["train_acc"].append(ep_acc)
+
+            # always do a val pass at epoch end
+            val_loss, val_acc = self.evaluate(self.val_loader, desc="val")
+            self.history["val_loss"].append(val_loss)
+            self.history["val_acc"].append(val_acc)
+            self.history["iteration"].append(iteration)
+
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_val_iteration = iteration
-            
-            # Store history
-            self.history['train_loss'].append(train_loss)
-            self.history['train_acc'].append(train_acc)
-            self.history['val_loss'].append(val_loss)
-            self.history['val_acc'].append(val_acc)
-            self.history['iteration'].append(iteration)
-            
-            print(f"  Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
-            print(f"  Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%")
-            print(f"  Best Val Loss: {best_val_loss:.4f} at iteration {best_val_iteration}")
-            
-            # Stop if we've exceeded target iterations
+
+            print(f"  Train Loss: {ep_loss:.4f} | Train Acc: {ep_acc:.2f}%")
+            print(f"  Val Loss:   {val_loss:.4f} | Val Acc:  {val_acc:.2f}%")
+            print(f"  Best Val Loss: {best_val_loss:.4f} @ iter {best_val_iteration}")
+
             if iteration >= num_iterations:
                 break
-        
-        # Final test evaluation
-        test_loss, test_acc = self.evaluate(self.test_loader, desc='Test')
-        self.history['test_acc'].append(test_acc)
-        
-        print(f"\n{'='*60}")
-        print(f"Training Complete!")
+
+        # final test eval
+        test_loss, test_acc = self.evaluate(self.test_loader, desc="test")
+        self.history["test_acc"].append(test_acc)
+
+        print("\n" + "=" * 60)
+        print("Training Complete!")
         print(f"  Final Test Accuracy: {test_acc:.2f}%")
-        print(f"  Best Validation Loss: {best_val_loss:.4f} at iteration {best_val_iteration}")
-        print(f"{'='*60}\n")
-        
+        print(f"  Best Validation Loss: {best_val_loss:.4f} @ iter {best_val_iteration}")
+        print("=" * 60 + "\n")
+
         return {
-            'best_val_loss': best_val_loss,
-            'best_val_iteration': best_val_iteration,
-            'final_test_acc': test_acc,
-            'history': self.history
+            "best_val_loss": best_val_loss,
+            "best_val_iteration": best_val_iteration,
+            "final_test_acc": test_acc,
+            "history": self.history,
         }
-    
+
     def get_early_stopping_iteration(self):
-        """Get iteration with minimum validation loss (early stopping criterion)"""
-        min_val_loss_idx = self.history['val_loss'].index(min(self.history['val_loss']))
-        return self.history['iteration'][min_val_loss_idx]
-
-
-if __name__ == "__main__":
-    from models.lenet import LeNet300100
-    from utils.data_loader import get_mnist_dataloaders
-    
-    # Setup
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-    
-    # Load data
-    train_loader, val_loader, test_loader = get_mnist_dataloaders(batch_size=60)
-    
-    # Create model
-    model = LeNet300100()
-    
-    # Create trainer
-    trainer = Trainer(model, device, train_loader, val_loader, test_loader)
-    
-    # Train for 2 epochs (quick test - paper uses 50K iterations ≈ 54 epochs)
-    results = trainer.train(num_iterations=2000, learning_rate=0.0012)
-    
-    print(f"\nEarly stopping would occur at iteration: {trainer.get_early_stopping_iteration()}")
+        # iteration with minimum val loss
+        min_idx = self.history["val_loss"].index(min(self.history["val_loss"]))
+        return self.history["iteration"][min_idx]
