@@ -34,7 +34,7 @@ class LeNet5(nn.Module):
         # Initialize weights
         self._initialize_weights()
     
-    def _init_weights(self):
+    def _initialize_weights(self):
         # kaiming init for relu nets
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
