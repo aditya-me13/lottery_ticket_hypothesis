@@ -28,13 +28,13 @@ class ExperimentRunner:
     def __init__(
         self,
         dataset="mnist",                 # mnist | fashion | cifar10
-        model_name="lenet300",           # lenet300 | lenet5 | conv6
+        model_name="lenet_fc",           # lenet_fc | lenet_conv | conv6
         pruning_type="magnitude",        # magnitude | random
         pruning_scope="layerwise",       # layerwise | global
         reinit_method="rewind",          # rewind | none | random
-        pruning_rate=0.2,
-        num_rounds=15,
-        iterations=50000,
+        pruning_rate=0.3,
+        num_rounds=16,
+        iterations=40000,
         learning_rate=0.0012,
         batch_size=60,
         device=None,
