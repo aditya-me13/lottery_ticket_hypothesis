@@ -75,18 +75,16 @@ class Trainer:
         # ceil division for display only
         num_epochs = (num_iterations + it_per_epoch - 1) // it_per_epoch
 
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 50)
         print("Training Configuration:")
         print(f"  Total iterations: {num_iterations:,}")
         print(f"  Epochs (approx): {num_epochs}")
-        print(f"  Learning rate: {learning_rate}")
-        print(f"  Optimizer: Adam")
         print(f"  Device: {self.device}")
         # model must expose these (your models do)
         print(f"  Parameters: {self.model.count_parameters():,}")
         print(f"  Non-zero parameters: {self.model.count_nonzero_parameters():,}")
         print(f"  Sparsity: {self.model.get_sparsity():.2f}%")
-        print("=" * 60 + "\n")
+        print("=" * 50 + "\n")
 
         iteration = 0
         best_val_loss = float("inf")
@@ -154,11 +152,11 @@ class Trainer:
         test_loss, test_acc = self.evaluate(self.test_loader, desc="test")
         self.history["test_acc"].append(test_acc)
 
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 50)
         print("Training Complete!")
         print(f"  Final Test Accuracy: {test_acc:.2f}%")
-        print(f"  Best Validation Loss: {best_val_loss:.4f} @ iter {best_val_iteration}")
-        print("=" * 60 + "\n")
+        print(f"  Best Validation Loss: {best_val_loss:.4f} at iter: {best_val_iteration}")
+        print("=" * 50 + "\n")
 
         return {
             "best_val_loss": best_val_loss,

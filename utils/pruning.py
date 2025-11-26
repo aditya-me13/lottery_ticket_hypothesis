@@ -32,7 +32,7 @@ class PruningManager:
 
                 self.masks[name] = buf
 
-        print(f"Initialized masks for {len(self.masks)} tensors")
+        print(f"Initialized masks for {len(self.masks)} layers")
 
     # zero out pruned weights
     def apply_masks(self):
@@ -54,7 +54,6 @@ class PruningManager:
 
         with torch.no_grad():
             if layer_wise:
-                print(f"Pruning {pruning_rate*100:.1f}% per layer")
 
                 for name, p in self.model.named_parameters():
                     if name in self.masks:
@@ -104,7 +103,6 @@ class PruningManager:
 
         self.apply_masks()
         sp = self.get_sparsity()
-        print(f"Sparsity now: {sp:.2f}%")
         return sp
 
     # random pruning
@@ -113,7 +111,6 @@ class PruningManager:
             self.initialize_masks()
 
         modules = dict(self.model.named_modules())
-        print(f"Random pruning {pruning_rate*100:.1f}%")
 
         with torch.no_grad():
             if layer_wise:
@@ -177,7 +174,6 @@ class PruningManager:
 
         self.apply_masks()
         sp = self.get_sparsity()
-        print(f"Sparsity now: {sp:.2f}%")
         return sp
 
     # Random reinitialization of surviving weights
