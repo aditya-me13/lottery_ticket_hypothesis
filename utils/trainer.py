@@ -143,7 +143,7 @@ class Trainer:
 
             print(f"  Train Loss: {ep_loss:.4f} | Train Acc: {ep_acc:.2f}%")
             print(f"  Val Loss:   {val_loss:.4f} | Val Acc:  {val_acc:.2f}%")
-            print(f"  Best Val Loss: {best_val_loss:.4f} @ iter {best_val_iteration}")
+            print(f"  Best Val Loss: {best_val_loss:.4f} at iter {best_val_iteration}")
 
             if iteration >= num_iterations:
                 break
