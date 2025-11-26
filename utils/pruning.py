@@ -171,13 +171,44 @@ class PruningManager:
                                 local = pos - cum[i]
                                 module, flat_mask, idx = active_map[names[i]]
                                 flat_mask[idx[local]] = 0
-                                setattr(module, self.masks[names[i]], flat_mask.reshape(mask.shape))
+                                setattr(module, self.masks[names[i]],
+                                        flat_mask.reshape(mask.shape))
                                 break
 
         self.apply_masks()
         sp = self.get_sparsity()
         print(f"Sparsity now: {sp:.2f}%")
         return sp
+
+    # Random reinitialization of surviving weights
+    def random_reinitialize_survivors(self):
+        print("Random reinitializing surviving weights")
+
+        modules = dict(self.model.named_modules())
+
+        with torch.no_grad():
+            for name, p in self.model.named_parameters():
+                if name in self.masks:
+                    module_name, _, p_short = name.rpartition(".")
+                    module = modules[module_name] if module_name else self.model
+                    mask = getattr(module, self.masks[name])
+
+                    # Only reinitialize weights where mask == 1
+                    if isinstance(p, nn.Parameter):
+                        new_w = torch.zeros_like(p.data)
+
+                        # create a temporary param just to apply kaiming init
+                        temp = torch.empty_like(p.data)
+                        nn.init.kaiming_normal_(temp, mode='fan_in', nonlinearity='relu')
+
+                        # keep only survivors' new values
+                        new_w[mask == 1] = temp[mask == 1]
+
+                        p.data.copy_(new_w)
+
+            self.apply_masks()
+
+        print("Finished random reinitialization")
 
     # reset θ → θ₀ but keep masks
     def reset_to_initial_weights(self):
