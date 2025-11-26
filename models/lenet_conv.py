@@ -34,25 +34,17 @@ class LeNet5(nn.Module):
         # Initialize weights
         self._initialize_weights()
     
-    def _initialize_weights(self):
-        """Gaussian Glorot (Xavier) initialization"""
+    def _init_weights(self):
+        # kaiming init for relu nets
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.xavier_normal_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
-                nn.init.constant_(m.bias, 0)
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                nn.init.zeros_(m.bias)
     
     def forward(self, x):
-        """
-        Forward pass
-        Args:
-            x: Input tensor of shape (batch_size, 1, 28, 28)
-        Returns:
-            Output logits of shape (batch_size, 10)
-        """
         # Conv1 + ReLU + MaxPool
         x = F.relu(self.conv1(x))      # (batch, 6, 24, 24)
         x = F.max_pool2d(x, 2)         # (batch, 6, 12, 12)
@@ -72,33 +64,26 @@ class LeNet5(nn.Module):
         return x
     
     def count_parameters(self):
-        """Count total trainable parameters"""
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+        # total prunable weights (biases ignored)
+        total = 0
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.Linear)):
+                total += m.weight.numel()
+        return total
     
     def count_nonzero_parameters(self):
-        """Count non-zero parameters (for sparsity calculation)"""
-        return sum((p != 0).sum().item() for p in self.parameters())
+        # how many weights are still non-zero
+        nz = 0
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.Linear)):
+                if hasattr(m, "weight_mask"):
+                    nz += int(m.weight_mask.sum().item())     # mask-based pruning
+                else:
+                    nz += int((m.weight != 0).sum().item())   # actual zeros
+        return nz
     
     def get_sparsity(self):
         """Calculate current sparsity percentage"""
         total = self.count_parameters()
         nonzero = self.count_nonzero_parameters()
         return 100.0 * (total - nonzero) / total
-
-
-# Test the model
-if __name__ == "__main__":
-    model = LeNet5()
-    print(f"Total parameters: {model.count_parameters():,}")
-    print(f"Architecture breakdown:")
-    print(f"  Conv1 (1->6):   {6*5*5 + 6:,} params")
-    print(f"  Conv2 (6->16):  {16*6*5*5 + 16:,} params")
-    print(f"  FC1 (256->120): {256*120 + 120:,} params")
-    print(f"  FC2 (120->84):  {120*84 + 84:,} params")
-    print(f"  FC3 (84->10):   {84*10 + 10:,} params")
-    
-    # Test forward pass
-    dummy_input = torch.randn(32, 1, 28, 28)
-    output = model(dummy_input)
-    print(f"\nOutput shape: {output.shape}")
-    print(f"Current sparsity: {model.get_sparsity():.2f}%")
