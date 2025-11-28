@@ -191,18 +191,59 @@ class ExperimentRunner:
     def save_results(self, filename=None):
         Path(self.results_dir).mkdir(parents=True, exist_ok=True)
 
+        # -------------------------------------------------------------
+        # ORIGINAL JSON SAVE (commented out per user request)
+        # -------------------------------------------------------------
+        # if filename is None:
+        #     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        #     pr_scope = "layer" if self.layer_wise else "global"
+        #     pr_rate = int(self.pruning_rate * 100)
+        #     filename = (
+        #         f"{self.dataset}_{self.model_name}_{self.pruning_type}_{pr_scope}_"
+        #         f"{self.reinit_method}_pr{pr_rate}_r{self.num_rounds}_it{self.iterations}_lr{self.learning_rate}_{ts}.json"
+        #     )
+        # path = Path(self.results_dir) / filename
+        # with open(path, "w") as f:
+        #     json.dump(self.results, f, indent=2)
+        # print(f"Saved JSON: {path}")
+        # return str(path)
+
+        
+
+        # -------------------------------------------------------------
+        # NEW CSV SAVE
+        # Format: round,remaining,ES,val,test
+        # -------------------------------------------------------------
+        import csv
+
         if filename is None:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             pr_scope = "layer" if self.layer_wise else "global"
             pr_rate = int(self.pruning_rate * 100)
             filename = (
                 f"{self.dataset}_{self.model_name}_{self.pruning_type}_{pr_scope}_"
-                f"{self.reinit_method}_pr{pr_rate}_r{self.num_rounds}_it{self.iterations}_lr{self.learning_rate}_{ts}.json"
+                f"{self.reinit_method}_pr{pr_rate}_r{self.num_rounds}_it{self.iterations}_lr{self.learning_rate}_{ts}.csv"
             )
+        else:
+            # ensure .csv extension (convert legacy .json names)
+            if filename.lower().endswith('.json'):
+                filename = filename[:-5] + '.csv'
+            elif not filename.lower().endswith('.csv'):
+                filename = filename + '.csv'
+
         path = Path(self.results_dir) / filename
 
-        with open(path, "w") as f:
-            json.dump(self.results, f, indent=2)
+        with open(path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['round', 'remaining', 'ES', 'val', 'test'])
+            for rec in self.results['rounds']:
+                writer.writerow([
+                    rec['round'],
+                    rec['remaining_before'],
+                    rec['early_stop_iteration'],
+                    rec['early_stop_val_acc'],
+                    rec['final_test_acc'],
+                ])
 
-        print(f"Saved: {path}")
+        print(f"Saved CSV: {path}")
         return str(path)
