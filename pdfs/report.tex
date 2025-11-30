@@ -1,0 +1,776 @@
+\documentclass[12pt,a4paper]{article}
+
+% --- Packages ---
+\usepackage{mathptmx}   % Times-like font for text and math
+\usepackage{times}      % Times New Roman
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{minted}
+\usepackage{listings}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage[hyphens]{url}
+\usepackage{hyperref}
+\usepackage{breakurl}
+\usepackage{titlesec}
+\usepackage{titletoc}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{parskip}
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{subcaption}
+\usepackage{xcolor}
+
+\definecolor{lightgray}{gray}{0.95}
+\lstset{
+  backgroundcolor=\color{lightgray},
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  tabsize=2,
+  showstringspaces=false
+}
+
+% --- Page Layout ---
+\geometry{
+    top=1in,
+    bottom=1in,
+    left=1in,
+    right=1in
+}
+
+% --- Header/Footer ---
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{ES667: Deep Learning Project}
+\fancyhead[R]{Lottery Ticket Hypothesis}
+\fancyfoot[C]{\thepage}
+
+% --- Hyperlink Setup ---
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=blue,
+    citecolor=blue,
+    pdftitle={Lottery Ticket Hypothesis Project Report},
+    pdfauthor={Aditya Mehta, Nikhil Goyal, Shardul Junagade}
+}
+
+% --- Paragraph Spacing ---
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0pt}
+
+% --- Section Formatting ---
+\titleformat{\section}
+  {\normalfont\Large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\bfseries}{\thesubsubsection}{1em}{}
+
+\begin{document}
+
+% --- Title Page ---
+\begin{titlepage}
+    \centering
+    \vspace{1cm}
+    
+    {\Huge \textbf{The Lottery Ticket Hypothesis} \par}
+    \vspace{0.5cm}
+    {\Large \textbf{Finding Sparse, Trainable Neural Networks} \par}
+    
+    \vspace{1.5cm}
+    
+    {\Large \textbf{ES667: Deep Learning} \par}
+    {\large Course Project Report \par}
+    
+    \vspace{1.5cm}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.40\linewidth]{iitgn_logo.png}
+        \label{fig:iitgn-logo}
+    \end{figure}
+    
+    \vspace{1cm}
+    
+    \textbf{Team Members:}
+    
+    \vspace{0.5cm}
+    
+    \begin{tabular}{l l}
+        Aditya Mehta & 22110017 \\
+        Nikhil Goyal & 23110218 \\
+        Shardul Junagade & 23110297
+    \end{tabular}
+    
+    \vspace{1.5cm}
+    
+    % \textbf{GitHub Repository:} \\
+    % \url{https://github.com/[username]/lottery_ticket_hypothesis}
+    
+    \vspace{1cm}
+    
+    {\large \textbf{Submission Date:} \today}
+    
+    \vfill
+    
+    {\small Indian Institute of Technology Gandhinagar \par}
+\end{titlepage}
+
+% --- Abstract (before TOC) ---
+\newpage
+% Make abstract in the center of the page
+
+
+\section*{ABSTRACT}
+\addcontentsline{toc}{section}{Abstract}
+
+% \begin{abstract}
+This project empirically validates the Lottery Ticket Hypothesis proposed by Frankle and Carbin \cite{frankle2019lottery}, demonstrating that dense neural networks contain sparse subnetworks ("winning tickets") trainable to comparable accuracy from their original initialization. We implemented iterative magnitude pruning \cite{han2015learning} on three architectures (LeNet-300-100, LeNet-5 \cite{lecun1998gradient}, and Conv-6) across three datasets (MNIST \cite{mnist}, Fashion-MNIST \cite{xiao2017fashion}, and CIFAR-10 \cite{cifar10}) with over 45 experimental configurations. Our results confirm that networks can be pruned to 5-10\% of original size while maintaining performance, with LeNet-5 achieving 99.16\% accuracy on MNIST at 49\% sparsity and Conv-6 showing 3.21\% improvement on CIFAR-10 at 24\% sparsity. Random reinitialization of identical sparse structures causes catastrophic failure (19-33\% accuracy drops) at extreme sparsity, while magnitude-based pruning consistently outperforms random pruning by 1.74-4.10\%. These findings validate that initialization is critical for sparse network trainability and that LTH holds broadly but depends on dataset complexity and model depth.
+% \end{abstract}
+
+\vspace{0.5cm}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/cifar10_conv6_test_accuracy.png}
+    \caption{CIFAR-10 Conv-6: Pruning improves accuracy by 3.21\% at 24\% sparsity through implicit regularization}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/fashion_lenet_fc_early_stop.png}
+    \caption{Fashion-MNIST LeNet-300-100: Sparse networks require more iterations to converge, especially with random reinitialization}
+\end{minipage}
+\end{figure}
+
+% --- Table of Contents ---
+% \newpage
+% \tableofcontents
+% \newpage
+
+% --- Main Content ---
+
+\newpage
+\section{PROBLEM DESCRIPTION}
+
+\subsection{Overview}
+
+Modern deep neural networks are heavily overparameterized, often containing millions to billions of parameters. While this overparameterization aids training and generalization, it poses significant challenges for deployment in resource-constrained environments such as mobile devices, embedded systems, and edge computing platforms. Neural network pruning techniques have demonstrated that trained networks can be compressed by 90\% or more while maintaining accuracy \cite{han2015learning,lecun1990optimal}, yet training these sparse architectures from scratch typically yields poor performance. This discrepancy raises a fundamental question: 
+
+\textit{If a network can be successfully pruned to a fraction of its original size after training, why can't we train that smaller network from the start?}
+
+\subsection{The Lottery Ticket Hypothesis}
+
+Frankle and Carbin \cite{frankle2019lottery} proposed the \textbf{Lottery Ticket Hypothesis} to address this paradox:
+
+\begin{quote}
+\textit{``A randomly-initialized, dense neural network contains a subnetwork that is initialized such that, when trained in isolation, it can match the test accuracy of the original network after training for at most the same number of iterations.''}
+\end{quote}
+
+The key insight is that initialization matters. The hypothesis suggests that:
+\begin{itemize}
+    \item Dense networks contain sparse subnetworks (``winning tickets'') with same initialization
+    \item These winning tickets can match the performance of the full network
+    \item The same sparse structure with random initialization performs poorly
+    \item Dense networks are easier to train because they contain more possible winning tickets
+\end{itemize}
+
+\subsection{Research Objectives}
+
+Our project aims to empirically validate the lottery ticket hypothesis through the following objectives:
+
+\begin{enumerate}
+    \item \textbf{Validate winning ticket existence:} Demonstrate that sparse subnetworks can match dense network accuracy when trained from original initialization
+    \item \textbf{Prove initialization dependency:} Show that random reinitialization of the same sparse structures results in degraded performance
+    \item \textbf{Characterize winning ticket regime:} Identify sparsity levels at which winning tickets maintain performance across architectures and datasets
+    \item \textbf{Analyze learning dynamics:} Compare training speed and generalization between winning tickets and random reinitialization
+    \item \textbf{Cross-dataset validation:} Test hypothesis robustness across varying task complexities
+\end{enumerate}
+
+% \subsection{Contributions}
+
+% Our work makes the following contributions:
+
+% \begin{itemize}
+%     \item \textbf{Comprehensive replication:} Successful validation of the lottery ticket hypothesis across three architectures and three datasets
+%     \item \textbf{Implementation insights:} Identification and resolution of critical implementation details (mask application during training)
+%     \item \textbf{Extended analysis:} Characterization of winning ticket behavior at extreme sparsity levels (down to 0.48\% of original size)
+%     \item \textbf{Open-source implementation:} Modular, well-documented codebase for reproducibility
+% \end{itemize}
+
+
+\newpage
+\section{SOLUTION APPROACH}
+
+We evaluated three neural network architectures across three datasets using multiple pruning strategies (magnitude-based IMP \cite{frankle2019lottery} and random pruning) and two reinitialization schemes (original weights and random Kaiming initialization). By combining these choices, we designed a set of controlled experiments to empirically test the claims of the Lottery Ticket Hypothesis. This section describes the datasets, models, training configurations, experiment setups, and implementation details. 
+
+\subsection{Datasets}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{p{4cm} p{10cm}}
+\toprule
+\textbf{Dataset Name} & \textbf{Description} \\
+\midrule
+
+\textbf{MNIST \cite{mnist}} &
+28$\times$28 grayscale handwritten digit images (10 classes).\\
+& Split: 55{,}000 train / 5{,}000 validation / 10{,}000 test.\\
+& Normalization: $\mu = 0.1307$, $\sigma = 0.3081$. \\
+
+\midrule
+
+\textbf{Fashion-MNIST \cite{xiao2017fashion}} &
+28$\times$28 grayscale clothing item images (10 classes).\\
+& Split: 55{,}000 train / 5{,}000 validation / 10{,}000 test.\\
+& Normalization: $\mu = 0.2860$, $\sigma = 0.3530$. \\
+
+\midrule
+
+\textbf{CIFAR-10 \cite{cifar10}} &
+32$\times$32 RGB natural images (10 classes).\\
+& Split: 45{,}000 train / 5{,}000 validation / 10{,}000 test.\\
+& Normalization (per channel): $\mu = (0.4914, 0.4822, 0.4465)$,\\
+& \hspace{4.8cm} $\sigma = (0.2023, 0.1994, 0.2010)$. \\
+
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Model Architectures}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{p{4cm} p{10cm}}
+\toprule
+\textbf{Model Name} & \textbf{Description} \\
+\midrule
+
+\textbf{LeNet-300-100} &
+Fully Connected Neural Network \\
+& Architecture: $784 \rightarrow 300 \rightarrow 100 \rightarrow 10$. (ReLU Activation)\\
+& Total parameters: \textbf{$\sim$266{,}000.}\\
+
+\midrule
+
+\textbf{LeNet-5\cite{lecun1998gradient}} &
+Convolutional Neural Network.\\
+& Layers: Conv1 $(1 \rightarrow 6)$ $\rightarrow$ MaxPool, \\
+& \makebox[1.4cm][l]{}Conv2 $(6 \rightarrow 16)$ $\rightarrow$ MaxPool.\\
+& Fully connected: $256 \rightarrow 120 \rightarrow 84 \rightarrow 10$.\\
+& Total parameters: \textbf{$\sim$61{,}000.}\\
+
+\midrule
+\textbf{Conv-6} & 
+Deep convolutional model with three VGG-style blocks:\\
+& B1: Conv1 $(3 \rightarrow 64)$, Conv2 $(64 \rightarrow 64)$, MaxPool.\\
+& B2: Conv3 $(64 \rightarrow 128)$, Conv4 $(128 \rightarrow 128)$, MaxPool.\\
+& B3: Conv5 $(128 \rightarrow 256)$, Conv6 $(256 \rightarrow 256)$, MaxPool.\\
+& Fully connected: $4096 \rightarrow 256\rightarrow 10$.\\
+& Total parameters: \textbf{$\sim$1.2 million}.\\
+
+
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Training Configuration}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{p{3cm} p{4cm} p{3.5cm} p{3.5cm}}
+\toprule
+\textbf{Parameter} & \textbf{Setting} & \textbf{Parameter} & \textbf{Setting} \\
+\midrule
+Optimizer & Adam* & Loss Function & Cross-entropy* \\
+Learning Rate & 0.0012* & Batch Size & 60* (Conv-6: 128) \\
+Iterations & 40{,}000 & Pruning Scope & Layer Wise* \\
+Pruning Rate $p$ & 30\% & Pruning Rounds & 16  \\
+Initialization & Kaiming Normal & Mask Enforcement & After every step* \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Footnote: The fields marked as * are the configurations directly copied from the original paper for reproducibility.
+
+
+% \textbf{Rationale for hyperparameter choices:}
+% \begin{itemize}
+%     \item \textbf{Learning rate:} Selected via grid search to balance convergence speed and stability
+%     \item \textbf{Iterations:} Sufficient for convergence even at high sparsity; paper uses 50K for LeNet-300-100
+%     \item \textbf{Pruning rate:} 30\% for LeNet-300-100 reaches extreme sparsity faster; 20\% for convolutional networks matches paper
+%     \item \textbf{Early stopping:} Iteration of minimum validation loss serves as proxy for learning speed
+% \end{itemize}
+
+\subsection{Iterative Magnitude Pruning Algorithm}
+
+The core algorithm for finding winning tickets follows the procedure from the paper \cite{frankle2019lottery}:
+
+\begin{algorithm}[H]
+\caption{Iterative Magnitude Pruning (IMP)}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} Network $f(x; \theta)$, pruning rate $p$, rounds $N$
+\STATE Randomly initialize: $\theta_0 \sim \mathcal{D}_\theta$ (e.g., Glorot)
+\STATE Save initial weights: $\theta_{\text{init}} \leftarrow \theta_0$
+\STATE Initialize mask: $m \leftarrow \mathbf{1}^{|\theta|}$ (all ones)
+\FOR{round $= 1$ to $N$}
+    \STATE Train network $f(x; m \odot \theta)$ for $j$ iterations $\rightarrow \theta_j$
+    \STATE Compute pruning threshold per layer:
+    \STATE \quad For each layer $\ell$: $\tau_\ell \leftarrow$ $p$-th percentile of $|\theta_j^{(\ell)}|$
+    \STATE Update mask: $m^{(\ell)} \leftarrow \mathbb{I}\{|\theta_j^{(\ell)}| > \tau_\ell\} \odot m^{(\ell)}$
+    \STATE Reset weights: $\theta \leftarrow m \odot \theta_{\text{init}}$ 
+\ENDFOR
+\STATE \textbf{Output:} Winning ticket $(m, \theta_{\text{init}})$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Experimental Designs}
+
+\textbf{Experiment 1: Magnitude Pruning + Rewind (Winning Tickets)}  
+Prune the lowest-magnitude weights each round and reset surviving weights to the original initialization $\theta_0$.  
+Purpose: Identify winning tickets.  
+Expected: Accuracy remains high even at strong sparsity.
+
+\textbf{Experiment 2: Magnitude Pruning + Random Reinitialization}  
+Use the same magnitude-based masks as Experiment 1, but reset surviving weights to new Kaiming-random values $\theta_0'$.  
+Purpose: Test whether initialization is critical.  
+Expected: Accuracy drops significantly as sparsity increases.
+
+\textbf{Experiment 3: Random Pruning + Rewind}  
+Randomly prune $p\%$ of active weights and reset the remaining weights to $\theta_0$.  
+Purpose: Test whether structure alone (without magnitude ranking) can form winning tickets.  
+Expected: Earlier performance degradation compared to magnitude pruning.
+
+
+
+
+
+% \textbf{Key Implementation Details:}
+
+% \begin{enumerate}
+%     \item \textbf{Layer-wise pruning:} We prune each layer independently rather than globally. For a given pruning rate $p$, we remove the $p$\% lowest-magnitude weights within each layer.
+    
+%     \item \textbf{Cumulative masking:} Masks are cumulative---once a weight is pruned, it remains pruned in all subsequent rounds: $m_{\text{new}} = \min(m_{\text{old}}, m_{\text{prune}})$
+    
+%     \item \textbf{Critical: Mask enforcement during training:} After every gradient update, we must reapply the mask to ensure pruned weights remain zero:
+%     \begin{verbatim}
+%     optimizer.step()
+%     pruner.apply_masks()  # θ ← m ⊙ θ
+%     \end{verbatim}
+%     Without this step, pruned weights receive gradient updates and become non-zero, invalidating the sparse training assumption.
+    
+%     \item \textbf{Weight reset:} The defining characteristic of lottery ticket experiments is resetting surviving weights to their \textit{original} initialization values $\theta_{\text{init}}$, not their trained values $\theta_j$.
+% \end{enumerate}
+
+
+
+\subsection{Evaluation Metrics}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{p{4cm} p{10cm}}
+\toprule
+\textbf{Metric} & \textbf{Description} \\
+\midrule
+Test Accuracy & Final test accuracy after each pruning round. \\
+Early-Stop Iteration & Iteration with the minimum validation loss. \\
+Sparsity & $\text{Sparsity} = \left(1 - \frac{\|m\|_0}{\|\theta\|}\right) \times 100\%$ \\
+Winning Ticket Range & Rounds where accuracy stays within $2\%$ of dense baseline. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Implementation}
+
+\textbf{Framework:} PyTorch 2.0+ \\
+\textbf{Hardware:} NVIDIA Tesla T4 (Kaggle GPU)
+
+\textbf{Unified Experiment Runner:}  
+Supports configurable selection of:
+\begin{itemize}[noitemsep, topsep=2pt]
+    \item Dataset and model
+    \item Pruning type: \texttt{magnitude / random}
+    \item Pruning scope: \texttt{layerwise / global}
+    \item Reinitialization: \texttt{rewind / random / none}
+    \item Pruning rate, rounds, iterations
+    \item Automatic logging of results (CSV)
+\end{itemize}
+
+\textbf{Repository:}  
+\url{https://github.com/aditya-me13/lottery-ticket-hypothesis}
+
+\noindent\textbf{Experiment Runner Sample Code Configuration:}
+\begin{lstlisting}[language=Python]
+# Clone the repository
+!git clone https://github.com/aditya-me13/lottery-ticket-hypothesis
+%cd lottery-ticket-hypothesis
+
+from experiments.experiment_runner import ExperimentRunner
+
+# Create and run experiment
+runner = ExperimentRunner(
+    dataset="mnist",           # "fashion" | "cifar10"
+    model_name="lenet_fc",     # "lenet_conv" | "conv6"
+    pruning_type="magnitude",  # "random"
+    pruning_scope="layerwise", # "global"
+    reinit_method="rewind",    # "random" | "none"
+    pruning_rate=0.98,
+    num_rounds=3,
+    iterations=400,
+    learning_rate=0.0012,
+    results_dir="results/"
+)
+
+results = runner.run()
+runner.save_results()
+\end{lstlisting}
+
+
+\newpage
+\section{RESULTS}
+
+We present results from five experimental configurations: LeNet-300-100 (FC) on MNIST, LeNet-5 (Conv) on MNIST, LeNet-300-100 (FC) on Fashion-MNIST, LeNet-5 (Conv) on Fashion-MNIST, and Conv-6 on CIFAR-10. For each, we compare three pruning strategies: (1) \textit{magnitude pruning with rewind} (winning tickets), (2) \textit{magnitude pruning with random reinitialization}, and (3) \textit{random pruning with rewind}. Key findings demonstrate the existence of winning tickets across all architectures and the critical role of initialization.
+
+\subsection{Winning Tickets: Magnitude Pruning with Original Initialization}
+
+\subsubsection{MNIST Experiments}
+
+\begin{table}[H]
+\centering
+\caption{Winning ticket performance on MNIST (30\% pruning/round)}
+\label{tab:mnist-winning-tickets}
+\small
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Architecture} & \textbf{Rd 1} & \textbf{Rd 5} & \textbf{Rd 9} & \textbf{Peak Acc} & \textbf{Range} \\
+\midrule
+LeNet-300-100 (FC) & 98.04\% & \textbf{98.35\%} & 97.79\% & 98.35\% (24\%) & 24-6\% \\
+LeNet-5 (Conv) & 98.40\% & 98.87\% & 97.98\% & \textbf{99.16\%} (49\%) & 49-6\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Observations:} LeNet-5 (Conv) achieves peak accuracy of 99.16\% at 49\% sparsity and maintains performance down to 5.78\% remaining weights. LeNet-300-100 (FC) peaks at 98.35\% with 24\% remaining. Both collapse below $\sim$2\% sparsity.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/mnist_lenet_fc_test_accuracy.png}
+    \caption{LeNet-300-100 on MNIST}
+    \label{fig:mnist-fc-acc}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/mnist_conv_test_accuracy.png}
+    \caption{LeNet-5 Conv on MNIST}
+    \label{fig:mnist-conv-acc}
+\end{minipage}
+\end{figure}
+
+\subsubsection{Fashion-MNIST Experiments}
+
+\begin{table}[H]
+\centering
+\caption{Winning ticket performance on Fashion-MNIST (30\% pruning/round)}
+\label{tab:fashion-winning-tickets}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Architecture} & \textbf{Rd 1} & \textbf{Rd 5} & \textbf{Peak Acc} & \textbf{Range} \\
+\midrule
+LeNet-300-100 (FC) & 88.41\% & 88.54\% & \textbf{89.10\%} (17\%) & 17-6\% \\
+LeNet-5 (Conv) & 87.88\% & 88.42\% & \textbf{88.92\%} (49\%) & 49-9\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Observations:} Fashion-MNIST proves harder than MNIST (baseline $\sim$88\% vs 98\%). Winning tickets exist with narrower sparsity ranges, degrading earlier than MNIST.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/fashion_lenet_fc_test_accuracy.png}
+    \caption{LeNet-300-100 on Fashion-MNIST}
+    \label{fig:fashion-fc-acc}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/fashion_conv_test_accuracy.png}
+    \caption{LeNet-5 Conv on Fashion-MNIST}
+    \label{fig:fashion-conv-acc}
+\end{minipage}
+\end{figure}
+
+\subsubsection{CIFAR-10: Conv-6 on Natural Images}
+
+\begin{table}[H]
+\centering
+\caption{Conv-6 winning tickets on CIFAR-10 (30\% pruning/round)}
+\label{tab:cifar10-conv6}
+\small
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Architecture} & \textbf{Rd 1} & \textbf{Rd 3} & \textbf{Rd 5} & \textbf{Rd 9} & \textbf{Peak Acc} & \textbf{Range} \\
+\midrule
+Conv-6 & 83.09\% & 85.73\% & \textbf{86.30\%} & 80.44\% & 86.30\% (24\%) & 24-6\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Observations:} Peak accuracy (86.30\%) at 24\% remaining—\textit{3.21\% higher} than dense network, suggesting implicit regularization from pruning. Performance remains competitive to 5.77\% sparsity.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\linewidth]{images/cifar10_conv6_test_accuracy.png}
+    \caption{Conv-6 on CIFAR-10 exhibits winning ticket behavior with performance boost at moderate sparsity}
+    \label{fig:cifar10-conv6-acc}
+\end{figure}
+
+\subsection{Initialization Dependency: Random vs. Original Initialization}
+
+\begin{table}[H]
+\centering
+\caption{Magnitude pruning: Original initialization (Rewind) vs. Random reinitialization}
+\label{tab:init-comparison}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Dataset-Model} & \textbf{Sparsity} & \textbf{Rewind Acc} & \textbf{Random Acc} & \textbf{Gap} \\
+\midrule
+\multirow{3}{*}{MNIST-FC} & 24.01\% & 98.35\% & 98.02\% & 0.33\% \\
+& 5.77\% & 97.79\% & 97.25\% & 0.54\% \\
+& 1.98\% & 96.30\% & 76.55\% & \textbf{19.75\%} \\
+\midrule
+\multirow{3}{*}{MNIST-Conv} & 24.02\% & 98.87\% & 98.64\% & 0.23\% \\
+& 5.78\% & 97.98\% & 95.98\% & 2.00\% \\
+& 1.99\% & 94.31\% & 60.72\% & \textbf{33.59\%} \\
+\midrule
+\multirow{3}{*}{Fashion-FC} & 24.02\% & 88.54\% & 88.42\% & 0.12\% \\
+& 8.25\% & 88.92\% & 86.07\% & 2.85\% \\
+& 4.05\% & 86.25\% & 63.02\% & \textbf{23.23\%} \\
+\midrule
+\multirow{3}{*}{Fashion-Conv} & 24.02\% & 88.54\% & 88.81\% & -0.27\% \\
+& 5.78\% & 88.37\% & 84.29\% & 4.08\% \\
+& 1.99\% & 74.77\% & 68.57\% & \textbf{6.20\%} \\
+\midrule
+\multirow{3}{*}{CIFAR10-Conv6} & 24.01\% & 86.30\% & 84.73\% & 1.57\% \\
+& 5.77\% & 80.44\% & 77.15\% & 3.29\% \\
+& 1.98\% & 70.22\% & 65.59\% & \textbf{4.63\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Critical Finding:} At moderate sparsity (24-6\%), original initialization provides marginal advantage ($<$2\% gap). At extreme sparsity ($<$2\% remaining), random reinitialization causes catastrophic degradation: 19.75\% (MNIST-FC), 33.59\% (MNIST-Conv), 23.23\% (Fashion-FC), and 6.20\% (Fashion-Conv). This validates that \textit{initialization is essential}, structure alone is insufficient.
+
+\subsection{Random Pruning vs. Magnitude Pruning}
+
+\begin{table}[H]
+\centering
+\caption{Magnitude vs. Random pruning (both with original initialization rewind)}
+\label{tab:pruning-comparison}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Dataset-Model} & \textbf{Sparsity} & \textbf{Magnitude Acc} & \textbf{Random Acc} & \textbf{Gap} \\
+\midrule
+\multirow{2}{*}{MNIST-FC} & 24.01\% & \textbf{98.35\%} & 97.77\% & 0.58\% \\
+& 5.77\% & \textbf{97.79\%} & 96.05\% & \textbf{1.74\%} \\
+\midrule
+\multirow{2}{*}{MNIST-Conv} & 24.02\% & \textbf{98.87\%} & 98.29\% & 0.58\% \\
+& 5.78\% & \textbf{97.98\%} & 96.52\% & \textbf{1.46\%} \\
+\midrule
+\multirow{2}{*}{Fashion-FC} & 24.01\% & \textbf{88.54\%} & 88.15\% & 0.39\% \\
+& 5.77\% & \textbf{88.92\%} & 87.33\% & \textbf{1.59\%} \\
+\midrule
+\multirow{2}{*}{Fashion-Conv} & 24.02\% & \textbf{88.54\%} & 88.42\% & 0.12\% \\
+& 5.78\% & \textbf{88.37\%} & 84.27\% & \textbf{4.10\%} \\
+\midrule
+\multirow{2}{*}{CIFAR10-Conv6} & 24.01\% & \textbf{86.30\%} & 84.73\% & 1.57\% \\
+& 5.77\% & \textbf{80.44\%} & 77.15\% & \textbf{3.29\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Observations:} Magnitude-based pruning consistently outperforms random pruning. At 24\% sparsity, gaps are negligible ($<$1.6\%), but at 5.77\%, magnitude pruning shows \textbf{1.74-4.10\% advantage}. This confirms \textit{structured weight selection} via magnitude ranking is superior to random masking.
+
+\subsection{Early Stopping Analysis}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/mnist_lenet_fc_early_stop.png}
+    \caption{MNIST LeNet-300-100 Early Stop}
+    \label{fig:mnist-fc-es}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/cifar10_conv6_early_stop.png}
+    \caption{CIFAR-10 Conv-6 Early Stop}
+    \label{fig:cifar10-es}
+\end{minipage}
+\end{figure}
+
+\textbf{Observations:} Winning tickets converge fastest at moderate sparsity (\textbf{$1.5\times$ speedup}). Random reinitialization requires \textbf{2-3$\times$ more iterations} at high sparsity. Random pruning shows erratic patterns, confirming inferior trainability.
+
+
+% \newpage
+\section{CONCLUSIONS}
+
+Our experiments \textbf{validate the lottery ticket hypothesis}, though with important caveats. LTH holds broadly but not universally: winning ticket stability depends on dataset complexity and model depth. Key findings: (1) winning tickets maintain $\sim$\textbf{98\% accuracy on MNIST} and $\sim$\textbf{88\% on Fashion-MNIST} at \textbf{5-10\% sparsity}, (2) random reinitialization causes \textbf{19-33\% accuracy drops} at extreme sparsity, proving \textbf{initialization is critical}, (3) magnitude pruning with original weights consistently outperforms random pruning by 1.74-4.10\%, and (4) pruning can \textbf{improve accuracy} (3.21\% gain on CIFAR-10) through \textbf{implicit regularization}. Random pruning is ineffective regardless of dataset. These results confirm that \textbf{initialization plays a crucial role} in network trainability: dense networks work because they contain multiple lottery tickets with favorable initializations.
+
+\section{LEARNINGS}
+
+\textbf{Implementation details matter.} Our initial experiments failed because we forgot to enforce masks after gradient updates: pruned weights became non-zero, breaking sparse training. This took two days to debug.
+
+\textbf{Computational trade-offs.} Running 16 rounds $\times$ 40K iterations $\times$ 3 experiments per configuration required parallelizing across Kaggle notebooks. We learned to prioritize experiments and validate assumptions early.
+
+\textbf{Middle-ground datasets help.} Fashion-MNIST proved valuable between MNIST (too easy) and CIFAR-10 (complex), revealing how task difficulty affects winning ticket ranges.
+
+\textbf{Visualization catches bugs fast.} Plotting accuracy curves after each round immediately exposed issues like incorrect mask enforcement or missing rewinding.
+
+\section{FUTURE WORK}
+
+\textbf{Deeper architectures.} Apply LTH to ResNets and VGG networks. Recent work \cite{frankle2020linear} shows rewinding to iteration $k > 0$ instead of initialization helps deeper models where initialization rewinding fails. Testing this on CIFAR-10 at extreme sparsity could extend winning ticket ranges.
+
+\textbf{Structured pruning.} We pruned individual weights, but modern hardware needs structured pruning of entire filters or channels \cite{li2017pruning}. Testing whether winning tickets exist for structured sparsity would be practically valuable.
+
+\textbf{Layer-wise adaptive rates.} Different layers may tolerate different pruning rates. Exploring adaptive pruning strategies could extend winning ticket ranges.
+
+\textbf{Early prediction.} Can we identify winning tickets before full training? Predicting ticket quality from early gradients or loss landscapes could save computation.
+
+\textbf{Cross-dataset transfer.} If winning tickets transfer across datasets, we could prune once and reuse masks for multiple tasks, valuable for deployment scenarios.
+
+\newpage
+\begin{thebibliography}{99}
+
+\bibitem{frankle2019lottery}
+J. Frankle and M. Carbin (2019).
+\textit{The Lottery Ticket Hypothesis: Finding Sparse, Trainable Neural Networks}.
+International Conference on Learning Representations (ICLR).
+Retrieved from \url{https://arxiv.org/abs/1803.03635}
+
+\bibitem{han2015learning}
+S. Han, J. Pool, J. Tran, and W. Dally (2015).
+\textit{Learning Both Weights and Connections for Efficient Neural Networks}.
+Advances in Neural Information Processing Systems (NeurIPS).
+Retrieved from \url{https://arxiv.org/abs/1506.02626}
+
+\bibitem{lecun1990optimal}
+Y. LeCun, J. Denker, and S. Solla (1990).
+\textit{Optimal Brain Damage}.
+Advances in Neural Information Processing Systems (NeurIPS).
+
+\bibitem{mnist}
+Y. LeCun and C. Cortes (2010).
+\textit{MNIST Handwritten Digit Database}.
+Retrieved from \url{http://yann.lecun.com/exdb/mnist/}
+
+\bibitem{xiao2017fashion}
+H. Xiao, K. Rasul, and R. Vollgraf (2017).
+\textit{Fashion-MNIST: A Novel Image Dataset for Benchmarking Machine Learning Algorithms}.
+arXiv preprint.
+Retrieved from \url{https://arxiv.org/abs/1708.07747}
+
+\bibitem{cifar10}
+A. Krizhevsky (2009).
+\textit{Learning Multiple Layers of Features from Tiny Images (CIFAR-10 Dataset)}.
+Technical Report, University of Toronto.
+Retrieved from \url{https://www.cs.toronto.edu/~kriz/cifar.html}
+
+\bibitem{lecun1998gradient}
+Y. LeCun, L. Bottou, Y. Bengio, and P. Haffner (1998).
+\textit{Gradient-Based Learning Applied to Document Recognition}.
+Proceedings of the IEEE.
+(Original source for LeNet-5)
+
+\bibitem{frankle2020linear}
+J. Frankle, G. K. Dziugaite, D. M. Roy, and M. Carbin (2020).
+\textit{Linear Mode Connectivity and the Lottery Ticket Hypothesis}.
+International Conference on Machine Learning (ICML).
+Retrieved from \url{https://arxiv.org/abs/1912.05671}
+
+\bibitem{li2017pruning}
+H. Li, A. Kadav, I. Durdanovic, H. Samet, and H. P. Graf (2017).
+\textit{Pruning Filters for Efficient ConvNets}.
+International Conference on Learning Representations (ICLR).
+Retrieved from \url{https://arxiv.org/abs/1608.08710}
+
+\end{thebibliography}
+
+\newpage
+\section*{APPENDIX}
+\addcontentsline{toc}{section}{Appendix}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/mnist_lenet_fc_val_accuracy.png}
+    \caption{MNIST LeNet-300-100 validation accuracy}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/mnist_conv_val_accuracy.png}
+    \caption{MNIST LeNet-5 Conv validation accuracy}
+\end{minipage}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/fashion_lenet_fc_val_accuracy.png}
+    \caption{Fashion-MNIST LeNet-300-100 validation accuracy}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/fashion_conv_val_accuracy.png}
+    \caption{Fashion-MNIST LeNet-5 Conv validation accuracy}
+\end{minipage}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/cifar10_conv6_val_accuracy.png}
+    \caption{CIFAR-10 Conv-6 validation accuracy}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/mnist_conv_early_stop.png}
+    \caption{MNIST LeNet-5 Conv early stopping}
+\end{minipage}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/fashion_lenet_fc_early_stop.png}
+    \caption{Fashion-MNIST LeNet-300-100 early stopping}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{images/fashion_conv_early_stop.png}
+    \caption{Fashion-MNIST LeNet-5 Conv early stopping}
+\end{minipage}
+\end{figure}
+
+
+\end{document}
